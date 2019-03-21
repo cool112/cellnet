@@ -55,7 +55,7 @@ func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err er
 		return
 	}
 
-	if len(body) < bodySize {
+	if len(body) < msgIDSize {
 		return nil, ErrShortMsgID
 	}
 
@@ -76,11 +76,11 @@ func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err er
 // 发送Length-Type-Value格式的封包流程
 func SendLTVPacket(writer io.Writer, ctx cellnet.ContextSet, data interface{}) error {
 
-	// 取Socket连接
-	var msgData []byte
-	var msgID int
-
-	var meta *cellnet.MessageMeta
+	var (
+		msgData []byte
+		msgID   int
+		meta    *cellnet.MessageMeta
+	)
 
 	switch m := data.(type) {
 	case *cellnet.RawPacket: // 发裸包
@@ -105,7 +105,7 @@ func SendLTVPacket(writer io.Writer, ctx cellnet.ContextSet, data interface{}) e
 	binary.LittleEndian.PutUint16(pkt, uint16(msgIDSize+len(msgData)))
 
 	// Type
-	binary.LittleEndian.PutUint16(pkt[msgIDSize:], uint16(msgID))
+	binary.LittleEndian.PutUint16(pkt[bodySize:], uint16(msgID))
 
 	// Value
 	copy(pkt[bodySize+msgIDSize:], msgData)

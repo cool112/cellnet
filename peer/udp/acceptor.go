@@ -1,8 +1,6 @@
 package udp
 
 import (
-	"expvar"
-	"fmt"
 	"github.com/davyxu/cellnet"
 	"github.com/davyxu/cellnet/peer"
 	"github.com/davyxu/cellnet/util"
@@ -18,15 +16,13 @@ type udpAcceptor struct {
 	peer.CoreContextSet
 	peer.CoreRunningTag
 	peer.CoreProcBundle
+	peer.CoreCaptureIOPanic
 
 	conn *net.UDPConn
 
 	sesQueue *util.Queue
 
 	sesTimeout time.Duration
-
-	mtSesQueueCount      *expvar.Int
-	mtTotalRecvUDPPacket *expvar.Int
 }
 
 func (self *udpAcceptor) IsReady() bool {
@@ -44,43 +40,51 @@ func (self *udpAcceptor) Port() int {
 
 func (self *udpAcceptor) Start() cellnet.Peer {
 
-	if self.mtSesQueueCount == nil {
-		self.mtSesQueueCount = expvar.NewInt(fmt.Sprintf("cellnet.Peer(%s).SessionQueueCount", self.Name()))
-	}
+	var finalAddr *util.Address
+	ln, err := util.DetectPort(self.Address(), func(a *util.Address, port int) (interface{}, error) {
 
-	if self.mtTotalRecvUDPPacket == nil {
-		self.mtTotalRecvUDPPacket = expvar.NewInt(fmt.Sprintf("cellnet.Peer(%s).TotalRecvUDPPacket", self.Name()))
-	}
-
-	ln, err := util.DetectPort(self.Address(), func(s string) (interface{}, error) {
-
-		addr, err := net.ResolveUDPAddr("udp", s)
+		addr, err := net.ResolveUDPAddr("udp", a.HostPortString(port))
 		if err != nil {
 			return nil, err
 		}
+
+		finalAddr = a
 
 		return net.ListenUDP("udp", addr)
 	})
 
 	if err != nil {
 
-		log.Errorf("#udp.resolve failed(%s) %v", self.NameOrAddress(), err.Error())
+		log.Errorf("#udp.resolve failed(%s) %v", self.Name(), err.Error())
 		return self
 	}
 
 	self.conn = ln.(*net.UDPConn)
 
 	if err != nil {
-		log.Errorf("#udp.listen failed(%s) %s", self.NameOrAddress(), err.Error())
+		log.Errorf("#udp.listen failed(%s) %s", self.Name(), err.Error())
 		self.SetRunning(false)
 		return self
 	}
 
-	log.Infof("#udp.listen(%s) %s", self.Name(), self.Address())
+	log.Infof("#udp.listen(%s) %s", self.Name(), finalAddr.String(self.Port()))
 
 	go self.accept()
 
 	return self
+}
+
+func (self *udpAcceptor) protectedRecvPacket(ses *udpSession, data []byte) {
+	defer func() {
+
+		if err := recover(); err != nil {
+			log.Errorf("IO panic: %s", err)
+			self.conn.Close()
+		}
+
+	}()
+
+	ses.Recv(data)
 }
 
 func (self *udpAcceptor) accept() {
@@ -97,10 +101,15 @@ func (self *udpAcceptor) accept() {
 		}
 
 		if n > 0 {
-			self.mtTotalRecvUDPPacket.Add(1)
 
 			ses := self.allocSession(remoteAddr)
-			ses.Recv(recvBuff[:n])
+
+			if self.CaptureIOPanic() {
+				self.protectedRecvPacket(ses, recvBuff[:n])
+			} else {
+				ses.Recv(recvBuff[:n])
+			}
+
 		}
 
 	}
@@ -130,8 +139,6 @@ func (self *udpAcceptor) allocSession(addr *net.UDPAddr) *udpSession {
 		ses = &udpSession{}
 		self.sesQueue.Enqueue(ses)
 	}
-
-	self.mtSesQueueCount.Set(int64(self.sesQueue.Count()))
 
 	ses.timeOutTick = time.Now().Add(self.sesTimeout)
 	ses.conn = self.conn

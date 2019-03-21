@@ -27,16 +27,15 @@ func (UDPMessageTransmitter) OnSendMessage(ses cellnet.Session, msg interface{})
 
 	msglog.WriteSendLogger(log, "udp", ses, msg)
 
-	return sendPacket(writer, ses.(cellnet.ContextSet), msg)
+	// 由于UDP session会被重用，这里使用peer的ContextSet为内存池分配
+	return sendPacket(writer, ses.Peer().(cellnet.ContextSet), msg)
 }
 
 func init() {
 
-	transmitter := new(UDPMessageTransmitter)
-
 	proc.RegisterProcessor("udp.ltv", func(bundle proc.ProcessorBundle, userCallback cellnet.EventCallback) {
 
-		bundle.SetTransmitter(transmitter)
+		bundle.SetTransmitter(new(UDPMessageTransmitter))
 		bundle.SetCallback(userCallback)
 
 	})

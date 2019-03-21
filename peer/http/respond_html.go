@@ -69,7 +69,6 @@ func (self *httpAcceptor) Compile() *template.Template {
 				}
 
 				name := r[0 : len(r)-len(ext)]
-				log.Infoln(filepath.ToSlash(name))
 				tmpl := t.New(filepath.ToSlash(name))
 
 				// add our funcmaps
@@ -127,21 +126,23 @@ func (self *HTMLRespond) WriteRespond(ses *httpSession) error {
 	return nil
 }
 
-type HTMLText struct {
+type TextRespond struct {
 	StatusCode int
 	Text       string
 }
 
-func (self *HTMLText) WriteRespond(ses *httpSession) error {
+func (self *TextRespond) WriteRespond(ses *httpSession) error {
 
-	peerInfo := ses.Peer().(cellnet.PeerProperty)
+	if log.IsDebugEnabled() {
+		peerInfo := ses.Peer().(cellnet.PeerProperty)
 
-	log.Debugf("#http.send(%s) '%s' %s | [%d] HTML '%s'",
-		peerInfo.Name(),
-		ses.req.Method,
-		ses.req.URL.Path,
-		self.StatusCode,
-		self.Text)
+		log.Debugf("#http.send(%s) '%s' %s | [%d] HTML '%s'",
+			peerInfo.Name(),
+			ses.req.Method,
+			ses.req.URL.Path,
+			self.StatusCode,
+			self.Text)
+	}
 
 	ses.resp.Header().Set("Content-Type", "text/html;charset=utf-8")
 	ses.resp.WriteHeader(self.StatusCode)
